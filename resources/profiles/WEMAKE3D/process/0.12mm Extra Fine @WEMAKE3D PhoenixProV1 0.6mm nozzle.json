@@ -1,5 +1,5 @@
 {
-  "name": "0.12mm Fine @WEMAKE3D PhoenixProV1 0.6mm nozzle",
+  "name": "0.12mm Extra Fine @WEMAKE3D PhoenixProV1 0.6mm nozzle",
   "inherits": "fdm_process_phoenixProV1_common",
   "instantiation": "true",
 
