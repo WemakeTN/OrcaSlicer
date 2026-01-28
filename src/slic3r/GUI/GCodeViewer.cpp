@@ -290,11 +290,14 @@ static std::string to_string(libvgcode::EGCodeExtrusionRole role)
     }
 }
 
-void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode::Viewer* viewer, int canvas_width, int canvas_height)
+void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode::Viewer* viewer, int canvas_width, int canvas_height, const libvgcode::EViewType& view_type)
 {
     static float last_window_width = 0.0f;
     static size_t last_text_length = 0;
     static bool properties_shown = false;
+    
+    const std::string NA_TXT = _u8L("N/A");
+    const char* NA_CSTR = NA_TXT.c_str();
 
     if (viewer != nullptr) {
         ImGuiWrapper& imgui = *wxGetApp().imgui();
@@ -307,8 +310,8 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
         ImGui::SetNextWindowBgAlpha(0.8f);
         imgui.begin(std::string("ToolPosition"), ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoMove);
         ImGui::AlignTextToFramePadding();
-        ImGuiWrapper::text_colored(ImGuiWrapper::COL_ORCA, _u8L("Position") + ":");
-        ImGui::SameLine();
+        // ImGuiWrapper::text_colored(ImGuiWrapper::COL_ORCA, _u8L("Position") + ":");
+        // ImGui::SameLine();
         libvgcode::PathVertex vertex = viewer->get_current_vertex();
         size_t vertex_id = viewer->get_current_vertex_id();
         if (vertex.type == libvgcode::EMoveType::Seam) {
@@ -316,10 +319,73 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
             vertex = viewer->get_vertex_at(vertex_id);
         }
 
-        char buf[1024];
-        sprintf(buf, "X: %.3f, Y: %.3f, Z: %.3f", vertex.position[0], vertex.position[1], vertex.position[2]);
-        ImGuiWrapper::text(std::string(buf));
+        const bool is_extrusion = vertex.is_extrusion();
+        char buf[1024]; char valBuf[32];
+        sprintf(buf, "X: %.3f, Y: %.3f, Z: %.3f Speed: %.0f ", vertex.position[0], vertex.position[1], vertex.position[2], vertex.feedrate);
+        switch (view_type) {
+            case libvgcode::EViewType::Height: {
+                if (is_extrusion)
+                    sprintf(valBuf, "%.2f", vertex.height);
+                else
+                    sprintf(valBuf, "%s", NA_CSTR);
+                sprintf(buf, "%s %s%s", buf, _u8L("Height: ").c_str(), valBuf);
+                break;
+            }
+            case libvgcode::EViewType::Width: {
+                if (is_extrusion)
+                    sprintf(valBuf, "%.2f", vertex.width);
+                else
+                    sprintf(valBuf, "%s", NA_CSTR);
+                sprintf(buf, "%s %s%s", buf, _u8L("Width: ").c_str(), valBuf);
+                break;
+            }
+            case libvgcode::EViewType::VolumetricFlowRate: {
+                if (is_extrusion)
+                    sprintf(valBuf, "%.2f", vertex.volumetric_rate());
+                else
+                    sprintf(valBuf, "%s", NA_CSTR);
+                sprintf(buf, "%s %s%s", buf, _u8L("Flow: ").c_str(), valBuf);
+                break;
+            }
+            case libvgcode::EViewType::FanSpeed: {
+                sprintf(buf, "%s %s%.0f", buf, _u8L("Fan: ").c_str(), vertex.fan_speed);
+                break;
+            }
+            case libvgcode::EViewType::Temperature: {
+                sprintf(buf, "%s %s%.0f", buf, _u8L("Temperature: ").c_str(), vertex.temperature);
+                break;
+            }
+            case libvgcode::EViewType::LayerTimeLinear:
+            case libvgcode::EViewType::LayerTimeLogarithmic: {
+                sprintf(buf, "%s %s%.1f", buf, _u8L("Layer Time: ").c_str(), vertex.layer_duration);
+                break;
+            }
+            case libvgcode::EViewType::Tool: {
+                sprintf(buf, "%s %s%d", buf, _u8L("Tool: ").c_str(), vertex.extruder_id + 1);
+                break;
+            }
+            case libvgcode::EViewType::ColorPrint: {
+                sprintf(buf, "%s %s%d", buf, _u8L("Color: ").c_str(), vertex.color_id + 1);
+                break;
+            }
+            case libvgcode::EViewType::ActualVolumetricFlowRate: {
+                // Don't display the actual flow, since it only gives data for the end of a segment
+                // sprintf(buf, "%s %s%.2f", buf, _u8L("Actual Flow: ").c_str(), vertex.actual_volumetric_rate());
+                break;
+            }
+            case libvgcode::EViewType::ActualSpeed: {
+                sprintf(buf, "%s %s%.1f", buf, _u8L("Actual Speed: ").c_str(), vertex.actual_feedrate);
+                break;
+            }
 
+            default:
+                break;
+            }
+        ImGuiWrapper::text(std::string(buf));
+        if (view_type == libvgcode::EViewType::FeatureType) {
+            ImGui::SameLine();
+            ImGuiWrapper::text_colored(ImGuiWrapper::COL_ORANGE_LIGHT, vertex.is_extrusion() ? to_string(vertex.role).c_str() : NA_CSTR);
+        }
         ImGui::SameLine();
         if (imgui.image_button(properties_shown ? ImGui::HorizontalHide : ImGui::HorizontalShow, properties_shown ? _u8L("Hide properties") : _u8L("Show properties"))) {
             properties_shown = !properties_shown;
@@ -341,32 +407,32 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
                 append_table_row(_u8L("Type"), [&vertex]() {
                     ImGuiWrapper::text(_u8L(to_string(vertex.type)));
                 });
-                append_table_row(_u8L("Feature type"), [&vertex]() {
+                append_table_row(_u8L("Feature type"), [&vertex, NA_TXT]() {
                     std::string text;
                     if (vertex.is_extrusion())
                         text = _u8L(to_string(vertex.role));
                     else
-                        text = _u8L("N/A");
+                        text = NA_TXT;
                     ImGuiWrapper::text(text);
                 });
-                append_table_row(_u8L("Width") + " (" + _u8L("mm") + ")", [&vertex, &buff]() {
+                append_table_row(_u8L("Width") + " (" + _u8L("mm") + ")", [&vertex, &buff, NA_TXT]() {
                     std::string text;
                     if (vertex.is_extrusion()) {
                         sprintf(buff, "%.3f", vertex.width);
                         text = std::string(buff);
                     }
                     else
-                        text = _u8L("N/A");
+                        text = NA_TXT;
                     ImGuiWrapper::text(text);
                 });
-                append_table_row(_u8L("Height") + " (" + _u8L("mm") + ")", [&vertex, &buff]() {
+                append_table_row(_u8L("Height") + " (" + _u8L("mm") + ")", [&vertex, &buff, NA_TXT]() {
                     std::string text;
                     if (vertex.is_extrusion()) {
                         sprintf(buff, "%.3f", vertex.height);
                         text = std::string(buff);
                     }
                     else
-                        text = _u8L("N/A");
+                        text = NA_TXT;
                     ImGuiWrapper::text(text);
                 });
                 append_table_row(_u8L("Layer"), [&vertex, &buff]() {
@@ -379,14 +445,14 @@ void GCodeViewer::SequentialView::Marker::render_position_window(const libvgcode
                     const std::string text = std::string(buff);
                     ImGuiWrapper::text(text);
                 });
-                  append_table_row(_u8L("Volumetric flow rate") + " (" + _u8L("mm³/s") + ")", [&vertex, &buff]() {
+                  append_table_row(_u8L("Volumetric flow rate") + " (" + _u8L("mm³/s") + ")", [&vertex, &buff, NA_TXT]() {
                     std::string text;
                     if (vertex.is_extrusion()) {
                         sprintf(buff, "%.3f", vertex.volumetric_rate());
                         text = std::string(buff);
                     }
                     else
-                        text = _u8L("N/A");
+                        text = NA_TXT;
                     ImGuiWrapper::text(text);
                   });
                 append_table_row(_u8L("Fan speed") + " (" + _u8L("%") + ")", [&vertex, &buff]() {
@@ -634,7 +700,7 @@ void GCodeViewer::SequentialView::GCodeWindow::render(float top, float bottom, f
                 max_text_width = w;
         }
 
-        required_width = id_width + max_text_width + 2.0f * ImGui::GetStyle().WindowPadding.x;
+        required_width = id_width + max_text_width;
     }
 
     ImGuiWrapper& imgui = *wxGetApp().imgui();
@@ -723,7 +789,7 @@ void GCodeViewer::SequentialView::render(const bool has_render_path, float legen
     if (has_render_path && m_show_marker) {
         // marker.set_world_offset(current_offset);
         marker.render(canvas_width, canvas_height, view_type);
-        marker.render_position_window(viewer, canvas_width, canvas_height);
+        marker.render_position_window(viewer, canvas_width, canvas_height, view_type);
     }
 
     //float bottom = wxGetApp().plater()->get_current_canvas3D()->get_canvas_size().get_height();
@@ -4013,6 +4079,9 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
         ImGui::SameLine(max_len*1.5);
         imgui.title(cgcode_time_str, false);
 
+        // ORCA: Get layer Zs as doubles
+        std::vector<double> layer_zs = get_layers_zs();
+
         for (Slic3r::CustomGCode::Item custom_gcode : custom_gcode_per_print_z) {
             ImGui::Dummy({window_padding, window_padding});
             ImGui::SameLine();
@@ -4026,8 +4095,8 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
             }
             ImGui::SameLine(max_len);
             char buf[64];
-            int layer = m_viewer.get_layer_id_at(custom_gcode.print_z);
-            ::sprintf(buf, "%d",layer );
+            int layer = find_close_layer_idx(layer_zs, custom_gcode.print_z, epsilon()); // ORCA: find layer index by Z
+            ::sprintf(buf, "%d", layer + 1); // +1 because layer 0 is the first layer
             imgui.text(buf);
             ImGui::SameLine(max_len * 1.5);
 
@@ -4035,7 +4104,7 @@ void GCodeViewer::render_legend(float &legend_height, int canvas_width, int canv
             float custom_gcode_time = 0;
             if (layer > 0)
             {
-                for (int i = 0; i < layer-1; i++) {
+                for (int i = 0; i < layer; i++) { // sum all previous layers time
                     custom_gcode_time += layer_times[i];
                 }
             }
